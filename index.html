@@ -108,6 +108,7 @@
 
     <!-- Firebase SDK -->
     <script type="module">
+        // Import the functions you need from the SDKs you need
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, updateDoc, query, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -120,10 +121,23 @@
             // Add your email here to gain access
         ];
 
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ieee-minutes-app';
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+          apiKey: "AIzaSyCpAOzlWYLl6tC0OXj7JksiJrEPkqZQOVo",
+          authDomain: "ieee-meeting-minutes-11d38.firebaseapp.com",
+          projectId: "ieee-meeting-minutes-11d38",
+          storageBucket: "ieee-meeting-minutes-11d38.appspot.com",
+          messagingSenderId: "656843811558",
+          appId: "1:656843811558:web:66a593ed3b6d63e036e927"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
         
-        let app, auth, db, minutesCollectionRef;
+        // --- App State ---
+        let minutesCollectionRef;
         let currentUserEmail = null;
         let unsubscribeFromMinutes = null;
 
@@ -204,7 +218,7 @@
 
             try {
                 if (minuteId) {
-                    await updateDoc(doc(db, `artifacts/${appId}/public/data/minutes`, minuteId), data);
+                    await updateDoc(doc(db, `artifacts/${app.options.appId}/public/data/minutes`, minuteId), data);
                 } else {
                     data.authorEmail = currentUserEmail;
                     data.createdAt = new Date().toISOString();
@@ -220,7 +234,7 @@
             if (!isUserAuthorized()) return;
             openConfirmModal('Are you sure you want to delete this minute?', async () => {
                 try {
-                    await deleteDoc(doc(db, `artifacts/${appId}/public/data/minutes`, id));
+                    await deleteDoc(doc(db, `artifacts/${app.options.appId}/public/data/minutes`, id));
                 } finally {
                     closeConfirmModal();
                 }
@@ -265,7 +279,7 @@
 
         // --- Realtime Listener ---
         function setupRealtimeListener() {
-            minutesCollectionRef = collection(db, `artifacts/${appId}/public/data/minutes`);
+            minutesCollectionRef = collection(db, `artifacts/${app.options.appId}/public/data/minutes`);
             const q = query(minutesCollectionRef);
             if (unsubscribeFromMinutes) unsubscribeFromMinutes();
 
@@ -287,14 +301,6 @@
 
         // --- App Initialization ---
         function initialize() {
-            if (!firebaseConfig || Object.keys(firebaseConfig).length === 0) {
-                authError.textContent = 'Firebase config is missing! App cannot start.';
-                return;
-            }
-            
-            app = initializeApp(firebaseConfig);
-            db = getFirestore(app);
-            auth = getAuth(app);
             setLogLevel('debug');
 
             onAuthStateChanged(auth, (user) => {
