@@ -72,7 +72,7 @@
         </header>
 
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <div id="loadingState" class="text-center py-12"><p class="text-gray-600">Loading meeting minutes...</p></div>
+            <div id="loadingState" class="text-center py-12 hidden"><p class="text-gray-600">Loading meeting minutes...</p></div>
             <div id="emptyState" class="text-center py-16 bg-white rounded-lg shadow hidden">
                  <h3 class="text-xl font-semibold text-gray-700">No Meeting Minutes Found</h3>
                  <p id="emptyStateText" class="text-gray-500 mt-2">Click "New Minute" to add the first one.</p>
@@ -104,205 +104,180 @@
         </div>
     </div>
 
-    <!-- Firebase SDK -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, updateDoc, query, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <!-- Local Storage Logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- UI Elements ---
+            const addMinuteBtn = document.getElementById('addMinuteBtn');
+            const minutesGrid = document.getElementById('minutes-grid');
+            const loadingState = document.getElementById('loadingState');
+            const emptyState = document.getElementById('emptyState');
+            
+            const minuteModal = document.getElementById('minuteModal');
+            const closeModalBtn = document.getElementById('closeModalBtn');
+            const saveBtn = document.getElementById('saveBtn');
+            const cancelBtn = document.getElementById('cancelBtn');
+            
+            const confirmModal = document.getElementById('confirmModal');
+            const confirmModalYes = document.getElementById('confirmModalYes');
+            const confirmModalNo = document.getElementById('confirmModalNo');
+            const confirmModalText = document.getElementById('confirmModalText');
 
-        // --- Firebase Configuration ---
-        // This configuration is now handled dynamically for portability.
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ieee-minutes-app-public';
+            // --- App State ---
+            let minutes = [];
+            let confirmCallback = null;
+            const STORAGE_KEY = 'ieee-minutes-data';
 
-        // --- App Initialization ---
-        let app, auth, db, minutesCollectionRef;
-        let currentUserId = null;
-        let unsubscribeFromMinutes = null;
-
-        // --- UI Elements ---
-        const addMinuteBtn = document.getElementById('addMinuteBtn');
-        const minutesGrid = document.getElementById('minutes-grid');
-        const loadingState = document.getElementById('loadingState');
-        const emptyState = document.getElementById('emptyState');
-        const emptyStateText = document.getElementById('emptyStateText');
-        
-        const minuteModal = document.getElementById('minuteModal');
-        const closeModalBtn = document.getElementById('closeModalBtn');
-        const saveBtn = document.getElementById('saveBtn');
-        const cancelBtn = document.getElementById('cancelBtn');
-        
-        const confirmModal = document.getElementById('confirmModal');
-        const confirmModalYes = document.getElementById('confirmModalYes');
-        const confirmModalNo = document.getElementById('confirmModalNo');
-        const confirmModalText = document.getElementById('confirmModalText');
-
-        // --- Modal Logic ---
-        const openModal = () => {
-            document.getElementById('minuteForm').reset();
-            document.getElementById('minuteId').value = '';
-            document.getElementById('modalTitle').textContent = 'Add New Meeting Minute';
-            minuteModal.classList.remove('hidden');
-        };
-        const closeModal = () => minuteModal.classList.add('hidden');
-        
-        let confirmCallback = null;
-        const openConfirmModal = (message, onConfirm) => {
-            confirmModalText.textContent = message;
-            confirmModal.classList.remove('hidden');
-            confirmCallback = onConfirm;
-        };
-        const closeConfirmModal = () => {
-            confirmModal.classList.add('hidden');
-            confirmCallback = null;
-        };
-
-        // --- Data Handling ---
-        const saveMinute = async () => {
-            const minuteId = document.getElementById('minuteId').value;
-            const data = {
-                title: document.getElementById('title').value.trim(),
-                date: document.getElementById('date').value,
-                minutes: document.getElementById('minutes').value.trim(),
+            // --- Local Storage Functions ---
+            const loadMinutes = () => {
+                const storedMinutes = localStorage.getItem(STORAGE_KEY);
+                minutes = storedMinutes ? JSON.parse(storedMinutes) : [];
             };
-            if (!data.title || !data.date || !data.minutes) {
-                // Using a custom modal for alerts is better, but for simplicity:
-                const customAlert = document.createElement('div');
-                customAlert.textContent = "Please fill out all fields.";
-                customAlert.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);background-color:red;color:white;padding:10px;border-radius:5px;z-index:100;";
-                document.body.appendChild(customAlert);
-                setTimeout(() => customAlert.remove(), 3000);
-                return;
-            }
 
-            try {
-                if (minuteId) {
-                    await updateDoc(doc(db, `artifacts/${appId}/public/data/minutes`, minuteId), data);
-                } else {
-                    data.authorId = currentUserId;
-                    data.createdAt = new Date().toISOString();
-                    await addDoc(minutesCollectionRef, data);
-                }
-                closeModal();
-            } catch (error) {
-                console.error("Error saving minute:", error);
-            }
-        };
+            const saveMinutes = () => {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(minutes));
+            };
 
-        const deleteMinute = async (id) => {
-            openConfirmModal('Are you sure you want to delete this minute?', async () => {
-                try {
-                    await deleteDoc(doc(db, `artifacts/${appId}/public/data/minutes`, id));
-                } catch(error) {
-                    console.error("Error deleting minute:", error);
-                } finally {
-                    closeConfirmModal();
-                }
-            });
-        };
+            // --- Rendering ---
+            const renderAllMinutes = () => {
+                minutesGrid.innerHTML = '';
+                emptyState.classList.toggle('hidden', minutes.length > 0);
+                
+                // Sort by date descending
+                minutes.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-        const editMinute = (minute) => {
-            document.getElementById('modalTitle').textContent = 'Edit Meeting Minute';
-            document.getElementById('minuteId').value = minute.id;
-            document.getElementById('title').value = minute.data.title;
-            document.getElementById('date').value = minute.data.date;
-            document.getElementById('minutes').value = minute.data.minutes;
-            openModal();
-        };
-
-        // --- Rendering ---
-        const renderMinuteCard = (minute) => {
-            const card = document.createElement('div');
-            card.className = 'bg-white rounded-lg shadow-md p-6 flex flex-col justify-between';
-            card.id = `minute-${minute.id}`;
-            const formattedDate = new Date(minute.data.date + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-            
-            card.innerHTML = `
-                <div>
-                    <p class="text-sm text-gray-500">${formattedDate}</p>
-                    <h3 class="text-xl font-bold text-ieee-blue mt-2">${minute.data.title}</h3>
-                    <p class="text-gray-700 mt-4 whitespace-pre-wrap h-40 overflow-y-auto">${minute.data.minutes}</p>
-                </div>
-                <div class="mt-6 flex justify-end space-x-2">
-                    <button data-action="edit" class="text-sm font-medium text-gray-500 hover:text-ieee-blue">Edit</button>
-                    <button data-action="delete" class="text-sm font-medium text-red-500 hover:text-red-700">Delete</button>
-                </div>`;
-            
-            card.querySelector('[data-action="edit"]').addEventListener('click', () => editMinute(minute));
-            card.querySelector('[data-action="delete"]').addEventListener('click', () => deleteMinute(minute.id));
-            return card;
-        };
-        
-        // --- Realtime Listener ---
-        function setupRealtimeListener() {
-            if (!db || !currentUserId) return;
-            minutesCollectionRef = collection(db, `artifacts/${appId}/public/data/minutes`);
-            const q = query(minutesCollectionRef);
-            if (unsubscribeFromMinutes) unsubscribeFromMinutes();
-
-            unsubscribeFromMinutes = onSnapshot(q, (snapshot) => {
-                loadingState.classList.add('hidden');
-                emptyState.classList.toggle('hidden', !snapshot.empty);
-                minutesGrid.innerHTML = ''; // Clear and redraw all for simplicity
-                const docs = snapshot.docs.map(doc => ({ id: doc.id, data: doc.data() }));
-                docs.sort((a, b) => new Date(b.data.date) - new Date(a.data.date));
-                docs.forEach(doc => {
-                    minutesGrid.appendChild(renderMinuteCard(doc));
+                minutes.forEach(minute => {
+                    minutesGrid.appendChild(createMinuteCard(minute));
                 });
-            }, (error) => {
-                console.error("Error fetching minutes:", error);
-                loadingState.textContent = 'Error loading data.';
-            });
-        }
+            };
 
-        // --- App Initialization ---
-        async function initialize() {
-            if (!firebaseConfig || Object.keys(firebaseConfig).length === 0) {
-                loadingState.textContent = 'Configuration Error. App cannot start.';
-                return;
-            }
+            const createMinuteCard = (minute) => {
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-lg shadow-md p-6 flex flex-col justify-between';
+                card.id = `minute-${minute.id}`;
+                // Add timezone offset to prevent date from being off by one day
+                const formattedDate = new Date(minute.date + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+                
+                card.innerHTML = `
+                    <div>
+                        <p class="text-sm text-gray-500">${formattedDate}</p>
+                        <h3 class="text-xl font-bold text-ieee-blue mt-2">${minute.title}</h3>
+                        <p class="text-gray-700 mt-4 whitespace-pre-wrap h-40 overflow-y-auto">${minute.minutes}</p>
+                    </div>
+                    <div class="mt-6 flex justify-end space-x-2">
+                        <button data-id="${minute.id}" data-action="edit" class="text-sm font-medium text-gray-500 hover:text-ieee-blue">Edit</button>
+                        <button data-id="${minute.id}" data-action="delete" class="text-sm font-medium text-red-500 hover:text-red-700">Delete</button>
+                    </div>`;
+                
+                return card;
+            };
+
+            // --- Modal Logic ---
+            const openAddModal = () => {
+                document.getElementById('minuteForm').reset();
+                document.getElementById('minuteId').value = '';
+                document.getElementById('modalTitle').textContent = 'Add New Meeting Minute';
+                minuteModal.classList.remove('hidden');
+            };
             
-            try {
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                setLogLevel('debug');
+            const openEditModal = (minute) => {
+                document.getElementById('minuteForm').reset();
+                document.getElementById('modalTitle').textContent = 'Edit Meeting Minute';
+                document.getElementById('minuteId').value = minute.id;
+                document.getElementById('title').value = minute.title;
+                document.getElementById('date').value = minute.date;
+                document.getElementById('minutes').value = minute.minutes;
+                minuteModal.classList.remove('hidden');
+            };
 
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        currentUserId = user.uid;
-                        console.log("User signed in with ID:", currentUserId);
-                        setupRealtimeListener();
-                    } else {
-                        currentUserId = null;
-                        if (unsubscribeFromMinutes) unsubscribeFromMinutes();
-                        minutesGrid.innerHTML = '<p class="text-center text-gray-600">Authentication failed. Please refresh the page.</p>';
-                        console.log("User is signed out.");
+            const closeModal = () => minuteModal.classList.add('hidden');
+            
+            const openConfirmModal = (message, onConfirm) => {
+                confirmModalText.textContent = message;
+                confirmModal.classList.remove('hidden');
+                confirmCallback = onConfirm;
+            };
+
+            const closeConfirmModal = () => {
+                confirmModal.classList.add('hidden');
+                confirmCallback = null;
+            };
+
+            // --- Data Handling ---
+            const handleSave = () => {
+                const minuteId = document.getElementById('minuteId').value;
+                const data = {
+                    title: document.getElementById('title').value.trim(),
+                    date: document.getElementById('date').value,
+                    minutes: document.getElementById('minutes').value.trim(),
+                };
+
+                if (!data.title || !data.date || !data.minutes) {
+                    // Using a custom modal for alerts is better, but for simplicity:
+                    const customAlert = document.createElement('div');
+                    customAlert.textContent = "Please fill out all fields.";
+                    customAlert.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);background-color:red;color:white;padding:10px;border-radius:5px;z-index:100;";
+                    document.body.appendChild(customAlert);
+                    setTimeout(() => customAlert.remove(), 3000);
+                    return;
+                }
+
+                if (minuteId) { // Editing existing minute
+                    const index = minutes.findIndex(m => m.id === minuteId);
+                    if (index > -1) {
+                        minutes[index] = { ...minutes[index], ...data };
                     }
-                });
-
-                // Use the provided custom token if available, otherwise sign in anonymously.
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
+                } else { // Adding new minute
+                    data.id = Date.now().toString();
+                    minutes.push(data);
                 }
+                
+                saveMinutes();
+                renderAllMinutes();
+                closeModal();
+            };
 
-            } catch(error) {
-                console.error("Initialization failed:", error);
-                loadingState.textContent = "Failed to initialize application."
-            }
+            const handleDelete = (id) => {
+                openConfirmModal('Are you sure you want to delete this minute?', () => {
+                    minutes = minutes.filter(m => m.id !== id);
+                    saveMinutes();
+                    renderAllMinutes();
+                    closeConfirmModal();
+                });
+            };
 
-            // Event Listeners
-            addMinuteBtn.addEventListener('click', openModal);
+            // --- Event Listeners ---
+            addMinuteBtn.addEventListener('click', openAddModal);
             closeModalBtn.addEventListener('click', closeModal);
             cancelBtn.addEventListener('click', closeModal);
-            saveBtn.addEventListener('click', saveMinute);
+            saveBtn.addEventListener('click', handleSave);
+
+            minutesGrid.addEventListener('click', (e) => {
+                const action = e.target.dataset.action;
+                const id = e.target.dataset.id;
+                if (!action || !id) return;
+
+                const minute = minutes.find(m => m.id === id);
+                if (!minute) return;
+
+                if (action === 'edit') {
+                    openEditModal(minute);
+                } else if (action === 'delete') {
+                    handleDelete(id);
+                }
+            });
+            
             confirmModalYes.addEventListener('click', () => { if (confirmCallback) confirmCallback(); });
             confirmModalNo.addEventListener('click', closeConfirmModal);
-        }
 
-        document.addEventListener('DOMContentLoaded', initialize);
+            // --- Initialization ---
+            const initialize = () => {
+                loadMinutes();
+                renderAllMinutes();
+            };
+
+            initialize();
+        });
     </script>
 </body>
 </html>
